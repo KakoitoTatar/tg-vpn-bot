@@ -1,0 +1,70 @@
+#!/usr/bin/env php
+<?php
+// application.php
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use App\Application\Services\DonationAlertsService\DonationAlertsServiceInterface;
+use App\Domain\Client\ClientRepositoryInterface;
+use App\Domain\Connection\ConnectionRepositoryInterface;
+use Doctrine\Migrations\Configuration\Migration\ConfigurationArray;
+use Doctrine\Migrations\DependencyFactory;
+use Doctrine\ORM\Tools\Console\ConsoleRunner;
+use Doctrine\ORM\Tools\Console\EntityManagerProvider\SingleManagerProvider;
+use Doctrine\ORM\Tools\SchemaTool;
+use Psr\Container\ContainerInterface;
+use Symfony\Component\Console\Application;
+use \Doctrine\Migrations\Tools\Console\Command;
+use Doctrine\Migrations\Configuration\EntityManager\ExistingEntityManager;
+
+/** @var \DI\Container $container */
+$container = require __DIR__ . '/../app/bootstrap.php';
+$migrationsConfig = require __DIR__ . '/../app/migrations.php';
+
+Dotenv\Dotenv::createImmutable(__DIR__ . '/../')->load();
+
+if (!function_exists('env')) {
+    function env($key, $default = null)
+    {
+        if ($_ENV[$key]) {
+            return $_ENV[$key];
+        }
+        return $default;
+    }
+}
+
+$configuration = new ConfigurationArray($migrationsConfig);
+
+$entityManagerInterface = $container->get(\Doctrine\ORM\EntityManagerInterface::class);
+$dependencyFactory = DependencyFactory::fromEntityManager(
+    $configuration,
+    new ExistingEntityManager($container->get(\Doctrine\ORM\EntityManagerInterface::class))
+);
+
+$commands = [
+    new Command\DumpSchemaCommand($dependencyFactory),
+    new Command\ExecuteCommand($dependencyFactory),
+    new Command\GenerateCommand($dependencyFactory),
+    new Command\LatestCommand($dependencyFactory),
+    new Command\ListCommand($dependencyFactory),
+    new Command\MigrateCommand($dependencyFactory),
+    new Command\RollupCommand($dependencyFactory),
+    new Command\StatusCommand($dependencyFactory),
+    new Command\SyncMetadataCommand($dependencyFactory),
+    new Command\VersionCommand($dependencyFactory),
+    new Command\DiffCommand($dependencyFactory),
+    new Command\CurrentCommand($dependencyFactory),
+    new Command\UpToDateCommand($dependencyFactory),
+    new \App\Infrastructure\Commands\CleanExpiredConnections('app:clients:process', $container->get(ConnectionRepositoryInterface::class)),
+    new \App\Infrastructure\Commands\ListenToNewPayments(
+        $container->get(\Psr\Log\LoggerInterface::class),
+        $container->get(DonationAlertsServiceInterface::class),
+        $container->get(\App\Application\Auth\JwtAuth::class),
+        $container->get(SergiX44\Nutgram\Nutgram::class)
+    )
+];
+
+ConsoleRunner::run(
+    new SingleManagerProvider($entityManagerInterface),
+    $commands
+);
